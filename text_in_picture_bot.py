@@ -25,8 +25,9 @@ class TextInPictureBot(object):
         self._dispatcher = self._updater.dispatcher
         self._dispatcher.add_handler(CommandHandler('hi', self._hi))
         self._dispatcher.add_handler(CommandHandler('start', self._start))
-        self._dispatcher.add_handler(CommandHandler('kaspersay', self._handle_say))
+        self._dispatcher.add_handler(CommandHandler('kaspersay', self._handle_say, allow_edited=True))
         self._dispatcher.add_handler(MessageHandler(Filters.text, callback=self._handle_message))
+        self._origin_message_send_picture = {}
 
     def _hi(self, bot, update):
         user = update.message.from_user.username
@@ -36,15 +37,23 @@ class TextInPictureBot(object):
         bot.send_message(chat_id=update.message.chat_id, text="Hello @{0}, send some text and Kasper will show a sign")
 
     def _handle_say(self, bot, update):
-        self._say(bot, update.message.chat_id, update.message.text[11:])
+        if update.message:
+            self._say(bot, update.message, text_skip=11)
+        elif update.edited_message:
+            # We have to delete the old picture, because the API doesn't provide a function to edit a photo
+            old_picture_id = self._origin_message_send_picture.get(update.edited_message.message_id, None)
+            if old_picture_id:
+                bot.delete_message(update.edited_message.chat_id, old_picture_id)
+            self._say(bot, update.edited_message, text_skip=11)
 
     def _handle_message(self, bot, update):
         bot.send_message(chat_id=update.message.chat_id, text="You said: {}".format(update.message.text))
-        self._say(bot, update.message.chat_id, update.message.text)
+        self._say(bot, update.message)
 
-    def _say(self, bot, chat_id, text):
+    def _say(self, bot, message, text_skip=0):
         img = Image.open(self._config["picture"])
         draw = ImageDraw.Draw(img)
+        text = message.text[text_skip:]
 
         x1, y1, x2, y2 = self._config["textbox_coordinates"]
         log.info("Got message: {}".format(text))
@@ -63,7 +72,8 @@ class TextInPictureBot(object):
         img.save(memory_img, format="jpeg")
         memory_img.seek(0)
 
-        bot.send_photo(chat_id=chat_id, photo=memory_img)
+        send_message = bot.send_photo(chat_id=message.chat_id, photo=memory_img)
+        self._origin_message_send_picture[message.message_id] = send_message.message_id
 
     def start(self):
         self._updater.start_polling()
